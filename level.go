@@ -7,19 +7,28 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// Level represents a log level.
+// Level represents the severity level of a log entry.
 type Level string
 
 const (
-	// DebugLevel logs are typically voluminous, and are usually disabled in production.
+	// DebugLevel is for verbose debugging information.
+	// Typically disabled in production environments.
 	DebugLevel Level = "debug"
-	// InfoLevel is the default logging priority.
+
+	// InfoLevel is for general informational messages.
+	// This is the default and recommended level for production.
 	InfoLevel Level = "info"
-	// WarnLevel logs are more important than Info, but don't need individual human review.
+
+	// WarnLevel is for warning messages about potentially harmful situations.
+	// More important than Info but doesn't require immediate action.
 	WarnLevel Level = "warn"
-	// ErrorLevel logs are high-priority. Applications running smoothly shouldn't generate any error-level logs.
+
+	// ErrorLevel is for error messages about failures.
+	// Applications running smoothly should not generate error-level logs.
 	ErrorLevel Level = "error"
-	// FatalLevel logs a message, then calls os.Exit(1).
+
+	// FatalLevel is for critical errors that cause the application to exit.
+	// After logging, the application will call os.Exit(1).
 	FatalLevel Level = "fatal"
 )
 

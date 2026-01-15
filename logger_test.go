@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/glennprays/log"
@@ -90,11 +91,10 @@ func TestLogger_LogLevels(t *testing.T) {
 		t.Fatalf("failed to create logger: %v", err)
 	}
 
-	// Test that all log methods work without panicking
-	logger.Debug("debug message", log.String("request_id", "123"))
-	logger.Info("info message", log.String("request_id", "123"))
-	logger.Warn("warn message", log.String("request_id", "123"))
-	logger.Error("error message", log.String("request_id", "123"))
+	logger.Debug("req-123", "debug message", nil)
+	logger.Info("req-123", "info message", nil)
+	logger.Warn("req-123", "warn message", nil)
+	logger.Error("req-123", "error message", nil)
 }
 
 func TestLogger_Fields(t *testing.T) {
@@ -110,9 +110,13 @@ func TestLogger_Fields(t *testing.T) {
 		t.Fatalf("failed to create logger: %v", err)
 	}
 
-	// Test various field types
-	logger.Info("testing fields",
-		log.String("request_id", "abc-123"),
+	logger.Info(
+		"abc-123",
+		"testing fields",
+		map[string]any{
+			"ip":     "192.168.1.1",
+			"method": "POST",
+		},
 		log.String("string_field", "value"),
 		log.Int("int_field", 42),
 		log.Int64("int64_field", 9999999999),
@@ -126,7 +130,7 @@ func TestLogger_LevelFiltering(t *testing.T) {
 	cfg := log.Config{
 		Service: "test-service",
 		Env:     "dev",
-		Level:   log.WarnLevel, // Only warn and above
+		Level:   log.WarnLevel,
 		Output:  log.OutputStdout,
 	}
 
@@ -135,13 +139,10 @@ func TestLogger_LevelFiltering(t *testing.T) {
 		t.Fatalf("failed to create logger: %v", err)
 	}
 
-	// These should be filtered out (no output expected)
-	logger.Debug("should not appear", log.String("request_id", "123"))
-	logger.Info("should not appear", log.String("request_id", "123"))
-
-	// These should appear
-	logger.Warn("should appear", log.String("request_id", "123"))
-	logger.Error("should appear", log.String("request_id", "123"))
+	logger.Debug("req-123", "should not appear", nil)
+	logger.Info("req-123", "should not appear", nil)
+	logger.Warn("req-123", "should appear", nil)
+	logger.Error("req-123", "should appear", nil)
 }
 
 func TestLogger_FileOutput(t *testing.T) {
@@ -164,15 +165,13 @@ func TestLogger_FileOutput(t *testing.T) {
 		t.Fatalf("failed to create logger: %v", err)
 	}
 
-	logger.Info("test file output", log.String("request_id", "test-123"))
+	logger.Info("test-123", "test file output", nil)
 	logger.Sync()
 
-	// Verify file was created
 	if _, err := os.Stat(tmpFile); os.IsNotExist(err) {
 		t.Errorf("log file was not created")
 	}
 
-	// Read and verify content
 	content, err := os.ReadFile(tmpFile)
 	if err != nil {
 		t.Fatalf("failed to read log file: %v", err)
@@ -182,14 +181,12 @@ func TestLogger_FileOutput(t *testing.T) {
 		t.Error("log file is empty")
 	}
 
-	// Verify it's valid JSON
 	var logEntry map[string]any
 	if err := json.Unmarshal(bytes.TrimSpace(content), &logEntry); err != nil {
 		t.Errorf("log output is not valid JSON: %v", err)
 	}
 
-	// Verify required fields
-	requiredFields := []string{"timestamp", "level", "message", "service", "env", "caller", "function"}
+	requiredFields := []string{"timestamp", "level", "message", "service", "env", "request_id", "metadata", "caller", "function"}
 	for _, field := range requiredFields {
 		if _, exists := logEntry[field]; !exists {
 			t.Errorf("missing required field: %s", field)
@@ -210,13 +207,151 @@ func TestLogger_RequiredFields(t *testing.T) {
 		t.Fatalf("failed to create logger: %v", err)
 	}
 
-	// Log a message - required fields should be auto-injected
-	logger.Info("test message",
-		log.String("request_id", "req-123"),
+	logger.Info(
+		"req-123",
+		"test message",
+		map[string]any{"key": "value"},
 		log.String("user_id", "user-456"),
 	)
+}
 
-	// Note: In a real test, you would capture stdout and verify the JSON output
-	// contains all required fields: timestamp, level, message, service, env,
-	// request_id, caller, function
+func TestLogger_EmptyRequestId(t *testing.T) {
+	cfg := log.Config{
+		Service: "test-service",
+		Env:     "dev",
+		Level:   log.InfoLevel,
+		Output:  log.OutputStdout,
+	}
+
+	logger, err := log.New(cfg)
+	if err != nil {
+		t.Fatalf("failed to create logger: %v", err)
+	}
+
+	testCases := []struct {
+		name string
+		fn   func()
+	}{
+		{"Debug", func() { logger.Debug("", "message", nil) }},
+		{"Info", func() { logger.Info("", "message", nil) }},
+		{"Warn", func() { logger.Warn("", "message", nil) }},
+		{"Error", func() { logger.Error("", "message", nil) }},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				r := recover()
+				if r == nil {
+					t.Error("expected panic for empty requestId, got none")
+				}
+				msg, ok := r.(string)
+				if !ok || !strings.Contains(msg, "requestId cannot be empty") {
+					t.Errorf("expected panic message to contain 'requestId cannot be empty', got: %v", r)
+				}
+			}()
+			tc.fn()
+		})
+	}
+}
+
+func TestLogger_NilMetadata(t *testing.T) {
+	tmpFile := "test_nil_metadata.log"
+	defer os.Remove(tmpFile)
+
+	cfg := log.Config{
+		Service:  "test-service",
+		Env:      "dev",
+		Level:    log.InfoLevel,
+		Output:   log.OutputFile,
+		FilePath: tmpFile,
+	}
+
+	logger, err := log.New(cfg)
+	if err != nil {
+		t.Fatalf("failed to create logger: %v", err)
+	}
+
+	logger.Info("req-123", "test nil metadata", nil, log.String("user_id", "user-456"))
+	logger.Sync()
+
+	content, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("failed to read log file: %v", err)
+	}
+
+	var logEntry map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(content), &logEntry); err != nil {
+		t.Errorf("log output is not valid JSON: %v", err)
+	}
+
+	if _, exists := logEntry["metadata"]; !exists {
+		t.Error("metadata field should exist even when nil")
+	}
+
+	if logEntry["metadata"] != nil {
+		t.Errorf("expected metadata to be null, got: %v", logEntry["metadata"])
+	}
+}
+
+func TestLogger_MetadataTypes(t *testing.T) {
+	tmpFile := "test_metadata_types.log"
+	defer os.Remove(tmpFile)
+
+	cfg := log.Config{
+		Service:  "test-service",
+		Env:      "dev",
+		Level:    log.InfoLevel,
+		Output:   log.OutputFile,
+		FilePath: tmpFile,
+	}
+
+	logger, err := log.New(cfg)
+	if err != nil {
+		t.Fatalf("failed to create logger: %v", err)
+	}
+
+	type customStruct struct {
+		Name  string
+		Value int
+	}
+
+	testCases := []struct {
+		name     string
+		metadata any
+	}{
+		{"map", map[string]any{"ip": "127.0.0.1", "method": "GET"}},
+		{"struct", customStruct{Name: "test", Value: 42}},
+		{"string", "simple string metadata"},
+		{"int", 12345},
+		{"slice", []string{"item1", "item2", "item3"}},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			logger.Info("req-"+tc.name, "testing metadata type: "+tc.name, tc.metadata)
+		})
+	}
+
+	logger.Sync()
+
+	content, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("failed to read log file: %v", err)
+	}
+
+	lines := bytes.Split(bytes.TrimSpace(content), []byte("\n"))
+	if len(lines) != len(testCases) {
+		t.Errorf("expected %d log entries, got %d", len(testCases), len(lines))
+	}
+
+	for _, line := range lines {
+		var logEntry map[string]any
+		if err := json.Unmarshal(line, &logEntry); err != nil {
+			t.Errorf("log output is not valid JSON: %v", err)
+		}
+		if _, exists := logEntry["metadata"]; !exists {
+			t.Error("metadata field should exist")
+		}
+	}
 }

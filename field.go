@@ -2,48 +2,51 @@ package log
 
 import "go.uber.org/zap"
 
-// Field is an opaque type that represents a log field.
-// It wraps zap.Field but does not expose it publicly.
+// Field represents a structured log field (key-value pair).
+// It is an opaque type that wraps the underlying logging implementation.
+// Use the provided helper functions (String, Int, etc.) to create fields.
 type Field struct {
 	zapField zap.Field
 }
 
-// String creates a string field.
+// String creates a field with a string value.
 func String(key, value string) Field {
 	return Field{zapField: zap.String(key, value)}
 }
 
-// Int creates an integer field.
+// Int creates a field with an integer value.
 func Int(key string, value int) Field {
 	return Field{zapField: zap.Int(key, value)}
 }
 
-// Int64 creates an int64 field.
+// Int64 creates a field with an int64 value.
 func Int64(key string, value int64) Field {
 	return Field{zapField: zap.Int64(key, value)}
 }
 
-// Float64 creates a float64 field.
+// Float64 creates a field with a float64 value.
 func Float64(key string, value float64) Field {
 	return Field{zapField: zap.Float64(key, value)}
 }
 
-// Bool creates a boolean field.
+// Bool creates a field with a boolean value.
 func Bool(key string, value bool) Field {
 	return Field{zapField: zap.Bool(key, value)}
 }
 
-// Any creates a field with any type. The value will be JSON-marshaled.
+// Any creates a field with any type of value.
+// The value will be JSON-marshaled in the log output.
+// Use this for complex types like maps, structs, and slices.
 func Any(key string, value any) Field {
 	return Field{zapField: zap.Any(key, value)}
 }
 
-// Error creates an error field with key "error".
+// Error creates an error field with the key "error".
+// The error message and type will be included in the log output.
 func Error(err error) Field {
 	return Field{zapField: zap.Error(err)}
 }
 
-// toZapFields converts a slice of Field to a slice of zap.Field.
 func toZapFields(fields []Field) []zap.Field {
 	zapFields := make([]zap.Field, len(fields))
 	for i, f := range fields {
