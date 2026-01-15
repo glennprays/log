@@ -13,14 +13,6 @@ An opinionated structured logging library for Go that enforces consistency and m
 - **Runtime context** - Automatic caller and function name injection
 - **Simple API** - Clean interface that hides Zap implementation details
 
-## Status
-
-✅ **Core functionality implemented (v0.1.0)**
-
-⚠️ **This library is in early development (v0.x)**
-
-The API may change before v1.0.0. See [PLAN.md](PLAN.md) for the implementation roadmap.
-
 ## Installation
 
 ```bash
@@ -48,14 +40,15 @@ func main() {
         panic(err)
     }
 
-    // Log with required fields
-    logger.Info("user logged in",
-        log.String("request_id", "abc-123"),
-        log.String("user_id", "user-456"),
-        log.Any("metadata", map[string]any{
+    // Log with requestId, metadata, and additional fields
+    logger.Info(
+        "abc-123",                              // requestId (required)
+        "user logged in",                       // message (required)
+        map[string]any{                         // metadata (optional, can be nil)
             "ip": "192.168.1.1",
             "method": "POST",
-        }),
+        },
+        log.String("user_id", "user-456"),     // additional fields
     )
 }
 ```
@@ -130,26 +123,28 @@ These fields are automatically included in every log entry:
 |-------|--------|-------------|
 | `timestamp` | auto | RFC3339 or epoch timestamp |
 | `level` | auto | debug, info, warn, error, fatal |
-| `message` | caller | Human-readable log message |
+| `message` | parameter | Human-readable log message (required parameter) |
 | `service` | config | Service name from Config |
 | `env` | config | Environment from Config |
-| `request_id` | **explicit** | **Must be provided by caller** |
+| `request_id` | **parameter** | **Required parameter - must be provided** |
+| `metadata` | parameter | Contextual data (required parameter, can be nil) |
 | `caller` | auto | file:line from runtime.Caller |
 | `function` | auto | Function name from runtime |
 
-**Note**: `request_id` must be explicitly passed as a field in every log call. This enforces request traceability.
+**Note**: `request_id` and `metadata` are required parameters in all log methods. Empty `request_id` will cause a panic.
 
 ### Optional Fields (User-Controlled)
 
 Add any additional structured data using field helpers:
 
 ```go
-logger.Info("processing request",
-    log.String("request_id", "abc-123"),      // Required
-    log.String("user_id", "user-456"),        // Optional
-    log.Int("response_code", 200),            // Optional
-    log.Any("metadata", map[string]any{...}), // Optional
-    log.Error(err),                           // Optional
+logger.Info(
+    "req-123",                                 // requestId (required)
+    "processing request",                      // message (required)
+    map[string]any{"trace": "xyz"},           // metadata (required, can be nil)
+    log.String("user_id", "user-456"),        // additional field
+    log.Int("response_code", 200),            // additional field
+    log.Error(err),                           // additional field
 )
 ```
 
@@ -164,11 +159,11 @@ Supported levels in order of severity:
 - `Fatal` - Critical errors that cause the application to exit (calls `os.Exit`)
 
 ```go
-logger.Debug("debugging info", log.String("request_id", "abc-123"))
-logger.Info("normal operation", log.String("request_id", "abc-123"))
-logger.Warn("something unusual", log.String("request_id", "abc-123"))
-logger.Error("operation failed", log.String("request_id", "abc-123"), log.Error(err))
-logger.Fatal("critical failure", log.String("request_id", "abc-123"), log.Error(err))
+logger.Debug("req-123", "debugging info", nil)
+logger.Info("req-123", "normal operation", nil)
+logger.Warn("req-123", "something unusual", nil)
+logger.Error("req-123", "operation failed", nil, log.Error(err))
+logger.Fatal("req-123", "critical failure", nil, log.Error(err))
 ```
 
 ## Field Helpers
@@ -210,17 +205,37 @@ func main() {
 - Use `ErrorLevel` for actual errors that need attention
 - Use `FatalLevel` only for unrecoverable errors
 
-### Request ID Pattern
+### Request ID and Empty String Validation
 
-Always pass a request ID for traceability:
+The requestId parameter is required and cannot be empty. Empty strings will cause a panic:
 
 ```go
-// At the start of request handling
 requestID := generateRequestID()
 
-// Use it in all log calls
-logger.Info("processing request", log.String("request_id", requestID))
-logger.Error("request failed", log.String("request_id", requestID), log.Error(err))
+// Correct - requestId is provided
+logger.Info(requestID, "processing request", nil)
+
+// PANIC - empty requestId
+logger.Info("", "this will panic", nil)  // panic: log: requestId cannot be empty
+```
+
+### Metadata vs Fields
+
+**When to use metadata:**
+- Contextual information that applies to the entire request
+- Request-level data: IP address, user agent, HTTP method, path, headers
+- Example: `map[string]any{"ip": "192.168.1.1", "method": "GET", "path": "/api/users"}`
+
+**When to use fields:**
+- Specific log entry details
+- Business data: user_id, order_id, product_id, response_code
+- Example: `log.String("user_id", "user-123"), log.Int("response_code", 200)`
+
+**Using nil metadata:**
+```go
+// Simple logs without contextual information
+logger.Info("req-123", "cache hit", nil)
+logger.Debug("req-123", "processing step 1", nil)
 ```
 
 ## Collector Integration
@@ -288,29 +303,6 @@ This library prioritizes:
 - **Simplicity** - Boring, predictable, trustworthy
 - **Long-term maintainability** - Stable API, internal flexibility
 - **Open-source readiness** - Clear versioning and documentation
-
-## Roadmap
-
-See [PLAN.md](PLAN.md) for the detailed 9-step implementation plan.
-
-**Current status: v0.1.0 - Core implementation complete ✅**
-
-Completed steps:
-- ✅ Step 1: Initialize Module
-- ✅ Step 2: Define Config
-- ✅ Step 3: Define Field Abstraction
-- ✅ Step 4: Caller & Function Extraction
-- ✅ Step 5: Implement zap Wrapper (internal)
-- ✅ Step 6: Logger Instance
-- ✅ Step 7: File Output + Rotation
-- ✅ Step 8: Testing
-- ✅ Step 9: Documentation
-
-Next steps for v1.0.0:
-- Production testing and feedback
-- API stabilization
-- Performance benchmarks
-- Additional examples and use cases
 
 ## License
 
