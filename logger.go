@@ -54,6 +54,31 @@ func New(cfg Config) (*Logger, error) {
 	}, nil
 }
 
+// With creates a child logger with pre-bound fields.
+// The pre-bound fields will be included in all subsequent log calls from the child logger.
+// The parent logger remains unchanged (immutable pattern).
+//
+// Example:
+//
+//	userLogger := logger.With(log.String("user_id", "user-456"))
+//	userLogger.Info("req-123", "user action", nil)  // includes user_id field
+//	logger.Info("req-456", "other action", nil)     // does not include user_id field
+//
+// Multiple levels of nesting are supported:
+//
+//	serviceLogger := logger.With(log.String("layer", "api"))
+//	userLogger := serviceLogger.With(log.String("user_id", "user-456"))
+//	userLogger.Info("req-123", "action", nil)  // includes both layer and user_id
+func (l *Logger) With(fields ...Field) *Logger {
+	if len(fields) == 0 {
+		return l
+	}
+	zapFields := toZapFields(fields)
+	return &Logger{
+		zapLogger: l.zapLogger.With(zapFields...),
+	}
+}
+
 // Debug logs a message at debug level.
 //
 // Parameters:

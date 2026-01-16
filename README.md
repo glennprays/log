@@ -180,6 +180,47 @@ log.Any(key, value)              // Any type (marshaled as JSON)
 log.Error(err)                   // Error field (uses "error" as key)
 ```
 
+## Child Loggers with Pre-bound Fields
+
+Create child loggers with pre-bound fields using the `With()` method. This is useful for adding contextual fields that apply to multiple log calls:
+
+### Basic Usage
+
+```go
+// Create a child logger with pre-bound user context
+userLogger := logger.With(
+    log.String("user_id", "user-456"),
+    log.String("session_id", "sess-789"),
+)
+
+// All logs from child logger include pre-bound fields
+userLogger.Info("req-123", "user logged in", nil)
+userLogger.Info("req-456", "user updated profile", nil)
+
+// Original logger is unchanged
+logger.Info("req-789", "system event", nil)  // does not include user fields
+```
+
+### Nested Child Loggers
+
+Multiple levels of nesting are supported. Fields accumulate from all parent loggers:
+
+```go
+serviceLogger := logger.With(log.String("layer", "api"))
+userLogger := serviceLogger.With(log.String("user_id", "user-456"))
+actionLogger := userLogger.With(log.String("action", "purchase"))
+
+// Logs include all accumulated fields: layer, user_id, action
+actionLogger.Info("req-123", "processing", nil)
+```
+
+### Benefits
+
+- **Reduce repetition** - Set common fields once instead of on every log call
+- **Contextual logging** - Create loggers for specific components or operations
+- **Immutable** - Parent logger remains unchanged
+- **Composable** - Build loggers with accumulating context
+
 ## Best Practices
 
 ### Flush Logs on Shutdown
