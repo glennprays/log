@@ -347,4 +347,4 @@ This library prioritizes:
 
 ## License
 
-[To be determined]
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details
