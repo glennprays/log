@@ -10,7 +10,7 @@ An opinionated structured logging library for Go that enforces consistency and m
 - **Structured logging** - JSON output to stdout by default
 - **Collector-friendly** - Works seamlessly with Fluent Bit, Promtail, Vector, and other log collectors
 - **Type-safe fields** - Field helpers prevent logging errors
-- **Runtime context** - Automatic caller and function name injection
+- **Optional runtime context** - Caller and function name injection when enabled
 - **Simple API** - Clean interface that hides Zap implementation details
 
 ## Installation
@@ -31,18 +31,19 @@ import (
 func main() {
     // Create a logger instance
     logger, err := log.New(log.Config{
-        Service: "my-service",
-        Env:     "dev",
-        Level:   log.InfoLevel,
-        Output:  log.OutputStdout,
+        Service:      "my-service",
+        Env:          "dev",
+        Level:        log.InfoLevel,
+        Output:       log.OutputStdout,
+        EnableCaller: true,  // Enable for dev debugging
     })
     if err != nil {
         panic(err)
     }
 
-    // Log with requestId, metadata, and additional fields
+    // Log with traceId, metadata, and additional fields
     logger.Info(
-        "abc-123",                              // requestId (required)
+        "abc-123",                              // traceId (required)
         "user logged in",                       // message (required)
         map[string]any{                         // metadata (optional, can be nil)
             "ip": "192.168.1.1",
@@ -61,7 +62,7 @@ func main() {
   "message": "user logged in",
   "service": "my-service",
   "env": "dev",
-  "request_id": "abc-123",
+  "trace_id": "abc-123",
   "caller": "main.go:15",
   "function": "main.main",
   "user_id": "user-456",
@@ -72,18 +73,21 @@ func main() {
 }
 ```
 
+**Note**: `caller` and `function` fields are only included when `EnableCaller: true` is set in Config.
+
 ## Configuration
 
 ```go
 type Config struct {
-    Service    string     // Service name (required)
-    Env        string     // Environment: dev, staging, prod (required)
-    Level      Level      // Log level: InfoLevel, WarnLevel, etc. (required)
-    Output     OutputType // OutputStdout or OutputFile (required)
-    FilePath   string     // File path (required if Output is OutputFile)
-    MaxSizeMB  int        // Max size in MB before rotation (default: 100)
-    MaxBackups int        // Max number of old log files (default: 3)
-    MaxAgeDays int        // Max days to retain old logs (default: 28)
+    Service      string     // Service name (required)
+    Env          string     // Environment: dev, staging, prod (required)
+    Level        Level      // Log level: InfoLevel, WarnLevel, etc. (required)
+    Output       OutputType // OutputStdout or OutputFile (required)
+    FilePath     string     // File path (required if Output is OutputFile)
+    MaxSizeMB    int        // Max size in MB before rotation (default: 100)
+    MaxBackups   int        // Max number of old log files (default: 3)
+    MaxAgeDays   int        // Max days to retain old logs (default: 28)
+    EnableCaller bool       // Enable caller/function extraction (default: false)
 }
 ```
 
@@ -126,12 +130,21 @@ These fields are automatically included in every log entry:
 | `message` | parameter | Human-readable log message (required parameter) |
 | `service` | config | Service name from Config |
 | `env` | config | Environment from Config |
-| `request_id` | **parameter** | **Required parameter - must be provided** |
+| `trace_id` | **parameter** | **Required parameter - must be provided** |
 | `metadata` | parameter | Contextual data (required parameter, can be nil) |
-| `caller` | auto | file:line from runtime.Caller |
-| `function` | auto | Function name from runtime |
 
-**Note**: `request_id` and `metadata` are required parameters in all log methods. Empty `request_id` will cause a panic.
+**Note**: `trace_id` and `metadata` are required parameters in all log methods. Empty `trace_id` will cause a panic.
+
+### Optional Auto-Generated Fields
+
+These fields are automatically included when enabled via configuration:
+
+| Field | Source | Description | Config |
+|-------|--------|-------------|--------|
+| `caller` | auto | file:line from runtime.Caller | `EnableCaller: true` |
+| `function` | auto | Function name from runtime | `EnableCaller: true` |
+
+**Performance Note**: Caller extraction uses `runtime.Caller()` which has overhead (~200-500ns per call). Disable in production for better performance, enable in dev/staging for debugging.
 
 ### Optional Fields (User-Controlled)
 
@@ -139,7 +152,7 @@ Add any additional structured data using field helpers:
 
 ```go
 logger.Info(
-    "req-123",                                 // requestId (required)
+    "req-123",                                 // traceId (required)
     "processing request",                      // message (required)
     map[string]any{"trace": "xyz"},           // metadata (required, can be nil)
     log.String("user_id", "user-456"),        // additional field
@@ -246,18 +259,18 @@ func main() {
 - Use `ErrorLevel` for actual errors that need attention
 - Use `FatalLevel` only for unrecoverable errors
 
-### Request ID and Empty String Validation
+### Trace ID and Empty String Validation
 
-The requestId parameter is required and cannot be empty. Empty strings will cause a panic:
+The traceId parameter is required and cannot be empty. Empty strings will cause a panic:
 
 ```go
-requestID := generateRequestID()
+traceID := generateTraceID()
 
-// Correct - requestId is provided
-logger.Info(requestID, "processing request", nil)
+// Correct - traceId is provided
+logger.Info(traceID, "processing request", nil)
 
-// PANIC - empty requestId
-logger.Info("", "this will panic", nil)  // panic: log: requestId cannot be empty
+// PANIC - empty traceId
+logger.Info("", "this will panic", nil)  // panic: log: traceId cannot be empty
 ```
 
 ### Metadata vs Fields
@@ -277,6 +290,69 @@ logger.Info("", "this will panic", nil)  // panic: log: requestId cannot be empt
 // Simple logs without contextual information
 logger.Info("req-123", "cache hit", nil)
 logger.Debug("req-123", "processing step 1", nil)
+```
+
+## Caller Information
+
+The library can automatically include caller information (`caller` and `function` fields) in every log entry by enabling it in the configuration.
+
+### Configuration
+
+```go
+logger, err := log.New(log.Config{
+    Service:      "my-service",
+    Env:          "production",
+    Level:        log.InfoLevel,
+    Output:       log.OutputStdout,
+    EnableCaller: true,  // Enable caller extraction
+})
+```
+
+### Performance Considerations
+
+**Caller extraction has overhead**:
+- Uses `runtime.Caller()` which costs ~200-500ns per log call
+- In high-throughput services, this can add up
+- Recommended: Disable in production, enable in dev/staging
+
+**When to enable**:
+- Development environments for debugging
+- Staging environments for troubleshooting
+- Low-traffic production services where overhead is negligible
+
+**When to disable**:
+- High-throughput production services
+- Performance-critical code paths
+- When log volume is very high
+
+### Example Outputs
+
+**With EnableCaller: true**:
+```json
+{
+  "timestamp": "2025-01-15T10:30:00Z",
+  "level": "info",
+  "message": "user logged in",
+  "service": "my-service",
+  "env": "dev",
+  "trace_id": "abc-123",
+  "caller": "handler.go:45",
+  "function": "handlers.LoginHandler",
+  "metadata": null
+}
+```
+
+**With EnableCaller: false (default)**:
+```json
+{
+  "timestamp": "2025-01-15T10:30:00Z",
+  "level": "info",
+  "message": "user logged in",
+  "service": "my-service",
+  "env": "production",
+  "trace_id": "abc-123",
+  "metadata": null
+}
 ```
 
 ## Collector Integration

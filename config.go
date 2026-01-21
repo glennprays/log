@@ -37,6 +37,13 @@ type Config struct {
 	// MaxAgeDays is the maximum number of days to retain old log files (default: 28).
 	// Only used when Output is OutputFile.
 	MaxAgeDays int
+
+	// EnableCaller enables automatic caller and function extraction for each log entry.
+	// When enabled, 'caller' (file:line) and 'function' fields are added to logs.
+	// Performance note: Uses runtime.Caller which has ~200-500ns overhead per log call.
+	// Recommended: Enable in dev/staging for debugging, disable in production for performance.
+	// Default: false (disabled)
+	EnableCaller bool
 }
 
 // Validate checks if the Config is valid. Returns an error containing all validation failures.

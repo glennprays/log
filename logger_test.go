@@ -186,7 +186,8 @@ func TestLogger_FileOutput(t *testing.T) {
 		t.Errorf("log output is not valid JSON: %v", err)
 	}
 
-	requiredFields := []string{"timestamp", "level", "message", "service", "env", "request_id", "metadata", "caller", "function"}
+	requiredFields := []string{"timestamp", "level", "message", "service", "env", "trace_id", "metadata"}
+	// Note: caller and function are now optional fields controlled by EnableCaller config
 	for _, field := range requiredFields {
 		if _, exists := logEntry[field]; !exists {
 			t.Errorf("missing required field: %s", field)
@@ -215,7 +216,7 @@ func TestLogger_RequiredFields(t *testing.T) {
 	)
 }
 
-func TestLogger_EmptyRequestId(t *testing.T) {
+func TestLogger_EmptyTraceId(t *testing.T) {
 	cfg := log.Config{
 		Service: "test-service",
 		Env:     "dev",
@@ -243,11 +244,11 @@ func TestLogger_EmptyRequestId(t *testing.T) {
 			defer func() {
 				r := recover()
 				if r == nil {
-					t.Error("expected panic for empty requestId, got none")
+					t.Error("expected panic for empty traceId, got none")
 				}
 				msg, ok := r.(string)
-				if !ok || !strings.Contains(msg, "requestId cannot be empty") {
-					t.Errorf("expected panic message to contain 'requestId cannot be empty', got: %v", r)
+				if !ok || !strings.Contains(msg, "traceId cannot be empty") {
+					t.Errorf("expected panic message to contain 'traceId cannot be empty', got: %v", r)
 				}
 			}()
 			tc.fn()
@@ -493,11 +494,12 @@ func TestLogger_With_CallerCorrectness(t *testing.T) {
 	defer os.Remove(tmpFile)
 
 	cfg := log.Config{
-		Service:  "test-service",
-		Env:      "dev",
-		Level:    log.InfoLevel,
-		Output:   log.OutputFile,
-		FilePath: tmpFile,
+		Service:      "test-service",
+		Env:          "dev",
+		Level:        log.InfoLevel,
+		Output:       log.OutputFile,
+		FilePath:     tmpFile,
+		EnableCaller: true, // Enable caller for this test
 	}
 
 	logger, err := log.New(cfg)
@@ -668,7 +670,7 @@ func TestLogger_With_AllFieldTypes(t *testing.T) {
 	}
 }
 
-func TestLogger_With_RequestIdValidation(t *testing.T) {
+func TestLogger_With_TraceIdValidation(t *testing.T) {
 	cfg := log.Config{
 		Service: "test-service",
 		Env:     "dev",
@@ -683,15 +685,15 @@ func TestLogger_With_RequestIdValidation(t *testing.T) {
 
 	childLogger := logger.With(log.String("user_id", "user-456"))
 
-	// Should still panic on empty requestId
+	// Should still panic on empty traceId
 	defer func() {
 		r := recover()
 		if r == nil {
-			t.Error("expected panic for empty requestId, got none")
+			t.Error("expected panic for empty traceId, got none")
 		}
 		msg, ok := r.(string)
-		if !ok || !strings.Contains(msg, "requestId cannot be empty") {
-			t.Errorf("expected panic message to contain 'requestId cannot be empty', got: %v", r)
+		if !ok || !strings.Contains(msg, "traceId cannot be empty") {
+			t.Errorf("expected panic message to contain 'traceId cannot be empty', got: %v", r)
 		}
 	}()
 
@@ -755,5 +757,144 @@ func TestLogger_With_Metadata(t *testing.T) {
 	metadata, ok := entry2["metadata"].(map[string]any)
 	if !ok || metadata["ip"] != "192.168.1.1" {
 		t.Errorf("entry 2: expected metadata={ip: 192.168.1.1}, got %v", entry2["metadata"])
+	}
+}
+
+func TestLogger_CallerDisabledByDefault(t *testing.T) {
+	tmpFile := "test_caller_disabled.log"
+	defer os.Remove(tmpFile)
+
+	cfg := log.Config{
+		Service:  "test-service",
+		Env:      "production",
+		Level:    log.InfoLevel,
+		Output:   log.OutputFile,
+		FilePath: tmpFile,
+		// EnableCaller not set - defaults to false
+	}
+
+	logger, err := log.New(cfg)
+	if err != nil {
+		t.Fatalf("failed to create logger: %v", err)
+	}
+
+	logger.Info("req-123", "test message", nil, log.String("user_id", "user-456"))
+	logger.Sync()
+
+	content, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("failed to read log file: %v", err)
+	}
+
+	var logEntry map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(content), &logEntry); err != nil {
+		t.Errorf("log output is not valid JSON: %v", err)
+	}
+
+	// Caller and function should NOT be present
+	if _, exists := logEntry["caller"]; exists {
+		t.Error("caller field should not be present when EnableCaller is false")
+	}
+	if _, exists := logEntry["function"]; exists {
+		t.Error("function field should not be present when EnableCaller is false")
+	}
+
+	// Other required fields should still be present
+	requiredFields := []string{"timestamp", "level", "message", "service", "env", "trace_id", "metadata"}
+	for _, field := range requiredFields {
+		if _, exists := logEntry[field]; !exists {
+			t.Errorf("missing required field: %s", field)
+		}
+	}
+}
+
+func TestLogger_CallerEnabled(t *testing.T) {
+	tmpFile := "test_caller_enabled.log"
+	defer os.Remove(tmpFile)
+
+	cfg := log.Config{
+		Service:      "test-service",
+		Env:          "dev",
+		Level:        log.InfoLevel,
+		Output:       log.OutputFile,
+		FilePath:     tmpFile,
+		EnableCaller: true, // Explicitly enable
+	}
+
+	logger, err := log.New(cfg)
+	if err != nil {
+		t.Fatalf("failed to create logger: %v", err)
+	}
+
+	logger.Info("req-123", "test message", nil, log.String("user_id", "user-456"))
+	logger.Sync()
+
+	content, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("failed to read log file: %v", err)
+	}
+
+	var logEntry map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(content), &logEntry); err != nil {
+		t.Errorf("log output is not valid JSON: %v", err)
+	}
+
+	// Caller and function SHOULD be present
+	caller, callerExists := logEntry["caller"].(string)
+	if !callerExists {
+		t.Fatal("caller field should be present when EnableCaller is true")
+	}
+	if !strings.Contains(caller, "logger_test.go") {
+		t.Errorf("caller should contain logger_test.go, got %s", caller)
+	}
+
+	function, functionExists := logEntry["function"].(string)
+	if !functionExists {
+		t.Fatal("function field should be present when EnableCaller is true")
+	}
+	if !strings.Contains(function, "TestLogger_CallerEnabled") {
+		t.Errorf("function should contain TestLogger_CallerEnabled, got %s", function)
+	}
+}
+
+func TestLogger_With_PreservesCallerSetting(t *testing.T) {
+	tmpFile := "test_with_caller_setting.log"
+	defer os.Remove(tmpFile)
+
+	// Test with EnableCaller: true
+	cfg := log.Config{
+		Service:      "test-service",
+		Env:          "dev",
+		Level:        log.InfoLevel,
+		Output:       log.OutputFile,
+		FilePath:     tmpFile,
+		EnableCaller: true,
+	}
+
+	logger, err := log.New(cfg)
+	if err != nil {
+		t.Fatalf("failed to create logger: %v", err)
+	}
+
+	childLogger := logger.With(log.String("user_id", "user-456"))
+	childLogger.Info("req-123", "child message", nil)
+	logger.Sync()
+
+	content, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("failed to read log file: %v", err)
+	}
+
+	var logEntry map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(content), &logEntry); err != nil {
+		t.Errorf("log output is not valid JSON: %v", err)
+	}
+
+	// Child should have caller/function since parent had EnableCaller: true
+	if _, exists := logEntry["caller"]; !exists {
+		t.Error("child logger should preserve parent's EnableCaller setting")
+	}
+	if _, exists := logEntry["function"]; !exists {
+		t.Error("child logger should preserve parent's EnableCaller setting")
 	}
 }

@@ -49,8 +49,8 @@ func BuildLogger(service, env string, level zapcore.Level, outputType, filePath 
 	// Create core
 	core := zapcore.NewCore(encoder, writeSyncer, level)
 
-	// Build logger with initial fields
-	logger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(3))
+	// Build logger
+	logger := zap.New(core)
 
 	// Add service and env as default fields
 	logger = logger.With(

@@ -7,11 +7,12 @@ import (
 	"go.uber.org/zap"
 )
 
-// Logger provides structured logging with required requestId and metadata fields.
-// All log methods require a requestId for request traceability and accept optional
+// Logger provides structured logging with required traceId and metadata fields.
+// All log methods require a traceId for request traceability and accept optional
 // metadata for contextual information.
 type Logger struct {
-	zapLogger *zap.Logger
+	zapLogger    *zap.Logger
+	enableCaller bool // Cached from config for fast runtime access
 }
 
 // New creates a new Logger instance with the provided configuration.
@@ -50,7 +51,8 @@ func New(cfg Config) (*Logger, error) {
 	}
 
 	return &Logger{
-		zapLogger: zapLogger,
+		zapLogger:    zapLogger,
+		enableCaller: cfg.EnableCaller,
 	}, nil
 }
 
@@ -75,127 +77,163 @@ func (l *Logger) With(fields ...Field) *Logger {
 	}
 	zapFields := toZapFields(fields)
 	return &Logger{
-		zapLogger: l.zapLogger.With(zapFields...),
+		zapLogger:    l.zapLogger.With(zapFields...),
+		enableCaller: l.enableCaller, // Preserve parent's setting
 	}
 }
 
 // Debug logs a message at debug level.
 //
 // Parameters:
-//   - requestId: Request identifier for traceability (required, panics if empty)
+//   - traceId: Trace identifier for request traceability (required, panics if empty)
 //   - msg: Human-readable log message (required)
 //   - metadata: Contextual information (can be nil, always included in output)
 //   - fields: Additional structured fields (optional)
 //
-// Panics if requestId is empty.
-func (l *Logger) Debug(requestId string, msg string, metadata any, fields ...Field) {
-	if requestId == "" {
-		panic("log: requestId cannot be empty")
+// Panics if traceId is empty.
+func (l *Logger) Debug(traceId string, msg string, metadata any, fields ...Field) {
+	if traceId == "" {
+		panic("log: traceId cannot be empty")
 	}
-	caller := getCaller(1)
 	zapFields := toZapFields(fields)
 	zapFields = append(zapFields,
-		zap.String("request_id", requestId),
+		zap.String("trace_id", traceId),
 		zap.Any("metadata", metadata),
-		zap.String("caller", fmt.Sprintf("%s:%d", caller.file, caller.line)),
-		zap.String("function", caller.function),
 	)
+
+	// Add caller and function only if enabled
+	if l.enableCaller {
+		caller := getCaller(1)
+		zapFields = append(zapFields,
+			zap.String("caller", fmt.Sprintf("%s:%d", caller.file, caller.line)),
+			zap.String("function", caller.function),
+		)
+	}
+
 	l.zapLogger.Debug(msg, zapFields...)
 }
 
 // Info logs a message at info level.
 //
 // Parameters:
-//   - requestId: Request identifier for traceability (required, panics if empty)
+//   - traceId: Trace identifier for request traceability (required, panics if empty)
 //   - msg: Human-readable log message (required)
 //   - metadata: Contextual information (can be nil, always included in output)
 //   - fields: Additional structured fields (optional)
 //
-// Panics if requestId is empty.
-func (l *Logger) Info(requestId string, msg string, metadata any, fields ...Field) {
-	if requestId == "" {
-		panic("log: requestId cannot be empty")
+// Panics if traceId is empty.
+func (l *Logger) Info(traceId string, msg string, metadata any, fields ...Field) {
+	if traceId == "" {
+		panic("log: traceId cannot be empty")
 	}
-	caller := getCaller(1)
 	zapFields := toZapFields(fields)
 	zapFields = append(zapFields,
-		zap.String("request_id", requestId),
+		zap.String("trace_id", traceId),
 		zap.Any("metadata", metadata),
-		zap.String("caller", fmt.Sprintf("%s:%d", caller.file, caller.line)),
-		zap.String("function", caller.function),
 	)
+
+	// Add caller and function only if enabled
+	if l.enableCaller {
+		caller := getCaller(1)
+		zapFields = append(zapFields,
+			zap.String("caller", fmt.Sprintf("%s:%d", caller.file, caller.line)),
+			zap.String("function", caller.function),
+		)
+	}
+
 	l.zapLogger.Info(msg, zapFields...)
 }
 
 // Warn logs a message at warn level.
 //
 // Parameters:
-//   - requestId: Request identifier for traceability (required, panics if empty)
+//   - traceId: Trace identifier for request traceability (required, panics if empty)
 //   - msg: Human-readable log message (required)
 //   - metadata: Contextual information (can be nil, always included in output)
 //   - fields: Additional structured fields (optional)
 //
-// Panics if requestId is empty.
-func (l *Logger) Warn(requestId string, msg string, metadata any, fields ...Field) {
-	if requestId == "" {
-		panic("log: requestId cannot be empty")
+// Panics if traceId is empty.
+func (l *Logger) Warn(traceId string, msg string, metadata any, fields ...Field) {
+	if traceId == "" {
+		panic("log: traceId cannot be empty")
 	}
-	caller := getCaller(1)
 	zapFields := toZapFields(fields)
 	zapFields = append(zapFields,
-		zap.String("request_id", requestId),
+		zap.String("trace_id", traceId),
 		zap.Any("metadata", metadata),
-		zap.String("caller", fmt.Sprintf("%s:%d", caller.file, caller.line)),
-		zap.String("function", caller.function),
 	)
+
+	// Add caller and function only if enabled
+	if l.enableCaller {
+		caller := getCaller(1)
+		zapFields = append(zapFields,
+			zap.String("caller", fmt.Sprintf("%s:%d", caller.file, caller.line)),
+			zap.String("function", caller.function),
+		)
+	}
+
 	l.zapLogger.Warn(msg, zapFields...)
 }
 
 // Error logs a message at error level.
 //
 // Parameters:
-//   - requestId: Request identifier for traceability (required, panics if empty)
+//   - traceId: Trace identifier for request traceability (required, panics if empty)
 //   - msg: Human-readable log message (required)
 //   - metadata: Contextual information (can be nil, always included in output)
 //   - fields: Additional structured fields (optional)
 //
-// Panics if requestId is empty.
-func (l *Logger) Error(requestId string, msg string, metadata any, fields ...Field) {
-	if requestId == "" {
-		panic("log: requestId cannot be empty")
+// Panics if traceId is empty.
+func (l *Logger) Error(traceId string, msg string, metadata any, fields ...Field) {
+	if traceId == "" {
+		panic("log: traceId cannot be empty")
 	}
-	caller := getCaller(1)
 	zapFields := toZapFields(fields)
 	zapFields = append(zapFields,
-		zap.String("request_id", requestId),
+		zap.String("trace_id", traceId),
 		zap.Any("metadata", metadata),
-		zap.String("caller", fmt.Sprintf("%s:%d", caller.file, caller.line)),
-		zap.String("function", caller.function),
 	)
+
+	// Add caller and function only if enabled
+	if l.enableCaller {
+		caller := getCaller(1)
+		zapFields = append(zapFields,
+			zap.String("caller", fmt.Sprintf("%s:%d", caller.file, caller.line)),
+			zap.String("function", caller.function),
+		)
+	}
+
 	l.zapLogger.Error(msg, zapFields...)
 }
 
 // Fatal logs a message at fatal level, then calls os.Exit(1).
 //
 // Parameters:
-//   - requestId: Request identifier for traceability (required, panics if empty)
+//   - traceId: Trace identifier for request traceability (required, panics if empty)
 //   - msg: Human-readable log message (required)
 //   - metadata: Contextual information (can be nil, always included in output)
 //   - fields: Additional structured fields (optional)
 //
-// Panics if requestId is empty. After logging, this method calls os.Exit(1).
-func (l *Logger) Fatal(requestId string, msg string, metadata any, fields ...Field) {
-	if requestId == "" {
-		panic("log: requestId cannot be empty")
+// Panics if traceId is empty. After logging, this method calls os.Exit(1).
+func (l *Logger) Fatal(traceId string, msg string, metadata any, fields ...Field) {
+	if traceId == "" {
+		panic("log: traceId cannot be empty")
 	}
-	caller := getCaller(1)
 	zapFields := toZapFields(fields)
 	zapFields = append(zapFields,
-		zap.String("request_id", requestId),
+		zap.String("trace_id", traceId),
 		zap.Any("metadata", metadata),
-		zap.String("caller", fmt.Sprintf("%s:%d", caller.file, caller.line)),
-		zap.String("function", caller.function),
 	)
+
+	// Add caller and function only if enabled
+	if l.enableCaller {
+		caller := getCaller(1)
+		zapFields = append(zapFields,
+			zap.String("caller", fmt.Sprintf("%s:%d", caller.file, caller.line)),
+			zap.String("function", caller.function),
+		)
+	}
+
 	l.zapLogger.Fatal(msg, zapFields...)
 }
 
