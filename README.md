@@ -7,7 +7,7 @@ An opinionated structured logging library for Go that enforces consistency and m
 `github.com/glennprays/log` is a policy layer on top of [Zap](https://github.com/uber-go/zap) that provides:
 
 - **Standardized log structure** - Required fields on every log entry
-- **Structured logging** - JSON output to stdout by default
+- **Structured logging** - JSON output, stdout by default
 - **Collector-friendly** - Works seamlessly with Fluent Bit, Promtail, Vector, and other log collectors
 - **Type-safe fields** - Field helpers prevent logging errors
 - **Optional runtime context** - Caller and function name injection when enabled
@@ -29,12 +29,11 @@ import (
 )
 
 func main() {
-    // Create a logger instance
+    // Create a logger instance (Output defaults to stdout)
     logger, err := log.New(log.Config{
         Service:      "my-service",
         Env:          "dev",
         Level:        log.InfoLevel,
-        Output:       log.OutputStdout,
         EnableCaller: true,  // Enable for dev debugging
     })
     if err != nil {
@@ -75,6 +74,8 @@ func main() {
 
 **Note**: `caller` and `function` fields are only included when `EnableCaller: true` is set in Config.
 
+**Runnable examples**: see [`examples/stdout`](examples/stdout/main.go) and [`examples/file`](examples/file/main.go) — each prints exactly one JSON log entry (`go run ./examples/stdout`, `go run ./examples/file`) and leaves no files behind.
+
 ## Configuration
 
 ```go
@@ -82,7 +83,7 @@ type Config struct {
     Service      string     // Service name (required)
     Env          string     // Environment: dev, staging, prod (required)
     Level        Level      // Log level: InfoLevel, WarnLevel, etc. (required)
-    Output       OutputType // OutputStdout or OutputFile (required)
+    Output       OutputType // OutputStdout or OutputFile (default: OutputStdout)
     FilePath     string     // File path (required if Output is OutputFile)
     MaxSizeMB    int        // Max size in MB before rotation (default: 100)
     MaxBackups   int        // Max number of old log files (default: 3)
@@ -95,13 +96,14 @@ type Config struct {
 
 **stdout (default)**:
 ```go
+// Output omitted; defaults to stdout
 log.New(log.Config{
     Service: "my-service",
     Env:     "production",
     Level:   log.InfoLevel,
-    Output:  log.OutputStdout,
 })
 ```
+Runnable version: [`examples/stdout`](examples/stdout/main.go).
 
 **File with rotation**:
 ```go
@@ -116,6 +118,7 @@ log.New(log.Config{
     MaxAgeDays: 28,   // Optional: defaults to 28 days
 })
 ```
+Runnable version: [`examples/file`](examples/file/main.go).
 
 ## Required vs Optional Fields
 
@@ -134,6 +137,16 @@ These fields are automatically included in every log entry:
 | `metadata` | parameter | Contextual data (required parameter, can be nil) |
 
 **Note**: `trace_id` and `metadata` are required parameters in all log methods. Empty `trace_id` will cause a panic.
+
+### Reserved Field Keys
+
+The following JSON keys are owned by the library and **cannot be used in user fields** (via `With()` or any log method's `fields` parameter). Using one panics with `log: field key "<key>" is reserved`:
+
+`timestamp`, `level`, `message`, `service`, `env`, `trace_id`, `metadata`, `caller`, `function`
+
+This protects the log schema: duplicate JSON keys would otherwise let a user field override a required field in JSON decoders. Choose a distinct business key (e.g. `http_status` instead of `level`).
+
+> **v0.3 migration**: The nine keys above are newly rejected in v0.3 (previously silently allowed). **Only callers who used one of these keys as a user field need a source change**: rename the field to a distinct business key. Note that `error` is *not* reserved — `log.Error(err)` remains the supported way to attach an error. All v0.2 method signatures (`New`, `With`, `Debug`, `Info`, `Warn`, `Error`, `Fatal`, `Sync`), all configuration fields, and all field helpers remain unchanged and fully supported.
 
 ### Optional Auto-Generated Fields
 
@@ -190,7 +203,8 @@ log.Int64(key, value)            // Int64 field
 log.Float64(key, value)          // Float64 field
 log.Bool(key, value)             // Boolean field
 log.Any(key, value)              // Any type (marshaled as JSON)
-log.Error(err)                   // Error field (uses "error" as key)
+log.Error(err)                   // Error field (key "error"; writes the error's message,
+                                 // plus verbose/cause details for errors that expose them)
 ```
 
 ## Child Loggers with Pre-bound Fields
@@ -236,9 +250,9 @@ actionLogger.Info("req-123", "processing", nil)
 
 ## Best Practices
 
-### Flush Logs on Shutdown
+### Shut Down Loggers with Close
 
-Always call `Sync()` before your application exits to ensure all buffered logs are written:
+Call `Close()` when your application finishes logging. It releases file output and is the recommended lifecycle API for new code:
 
 ```go
 func main() {
@@ -246,11 +260,35 @@ func main() {
     if err != nil {
         panic(err)
     }
-    defer logger.Sync()  // Flush logs on exit
+    defer logger.Close()  // Release file sink on exit
 
     // Your application code...
 }
 ```
+
+`Close` behavior:
+
+- **Idempotent** — repeated calls return `nil`.
+- **Blocking** — waits until an in-flight write or `Sync` on the logger or any `With` child completes, then closes the sink. Stop all parent/child writes before calling `Close`.
+- **File-only** — for stdout loggers and `Nop`, `Close` is a no-op returning `nil`.
+- **Terminal for file output** — after `Close`, subsequent nonfatal entries (`Debug`, `Info`, `Warn`, `Error`) are discarded, `Sync` returns `nil`, and `Fatal` still exits with status 1 (without writing).
+
+A logger created with `Output: log.OutputFile` and every logger derived from it via `With()` **share the same file sink**: calling `Close` on any one of them terminates writes for all of them.
+
+### Sync (v0.2-Compatible Flush)
+
+`Sync()` remains a supported explicit flush API. stdout entries are written unbuffered as each call completes, so `Sync` returns `nil` for stdout output (v0.2's attempt to fsync stdout failed on pipes and terminals); file output is flushed through the sink. For file output `Sync` now waits for any in-flight write to finish, making it safe to call concurrently with `Close`. Existing v0.2 code using `defer logger.Sync()` continues to work.
+
+### No-op Logger
+
+`log.Nop()` returns a logger that emits nothing — useful for tests and for disabling logging without `nil` checks:
+
+```go
+logger := log.Nop()
+logger.Info("req-123", "discarded", nil)  // emits nothing
+```
+
+Input validation is preserved: an empty `traceId` or a reserved field key still panics, and `Fatal` still terminates the process with exit status 1. `Sync` and `Close` return `nil`, and `With()` stays valid and silent.
 
 ### Log Levels in Production
 

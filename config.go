@@ -7,8 +7,9 @@ import (
 )
 
 // Config holds logger configuration.
-// All fields except file rotation settings (MaxSizeMB, MaxBackups, MaxAgeDays) are required.
-// File rotation settings have defaults and are only used when Output is OutputFile.
+// Service, Env, and Level are required. Output defaults to OutputStdout when omitted.
+// File rotation settings (MaxSizeMB, MaxBackups, MaxAgeDays) have defaults and are
+// only used when Output is OutputFile.
 type Config struct {
 	// Service is the name of the service (required).
 	Service string
@@ -20,7 +21,8 @@ type Config struct {
 	// Use log.DebugLevel, log.InfoLevel, log.WarnLevel, log.ErrorLevel, or log.FatalLevel.
 	Level Level
 
-	// Output specifies where to write logs: OutputStdout or OutputFile (required).
+	// Output specifies where to write logs: OutputStdout or OutputFile.
+	// Defaults to OutputStdout when omitted.
 	Output OutputType
 
 	// FilePath is the path to the log file (required if Output is OutputFile).
@@ -47,7 +49,8 @@ type Config struct {
 }
 
 // Validate checks if the Config is valid. Returns an error containing all validation failures.
-// It also sets default values for file rotation settings if they are not provided.
+// It also sets default values for the output type (stdout) and file rotation settings
+// if they are not provided.
 func (c *Config) Validate() error {
 	var errs []error
 
@@ -73,7 +76,7 @@ func (c *Config) Validate() error {
 	}
 
 	if c.Output == "" {
-		errs = append(errs, errors.New("output type is required"))
+		c.Output = OutputStdout
 	} else if c.Output != OutputStdout && c.Output != OutputFile {
 		errs = append(errs, fmt.Errorf("output must be stdout or file (got: %s)", c.Output))
 	}

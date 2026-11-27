@@ -3,9 +3,15 @@ package log_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/glennprays/log"
 )
@@ -146,8 +152,7 @@ func TestLogger_LevelFiltering(t *testing.T) {
 }
 
 func TestLogger_FileOutput(t *testing.T) {
-	tmpFile := "test_log.log"
-	defer os.Remove(tmpFile)
+	tmpFile := filepath.Join(t.TempDir(), "test_log.log")
 
 	cfg := log.Config{
 		Service:    "test-service",
@@ -257,8 +262,7 @@ func TestLogger_EmptyTraceId(t *testing.T) {
 }
 
 func TestLogger_NilMetadata(t *testing.T) {
-	tmpFile := "test_nil_metadata.log"
-	defer os.Remove(tmpFile)
+	tmpFile := filepath.Join(t.TempDir(), "test_nil_metadata.log")
 
 	cfg := log.Config{
 		Service:  "test-service",
@@ -296,8 +300,7 @@ func TestLogger_NilMetadata(t *testing.T) {
 }
 
 func TestLogger_MetadataTypes(t *testing.T) {
-	tmpFile := "test_metadata_types.log"
-	defer os.Remove(tmpFile)
+	tmpFile := filepath.Join(t.TempDir(), "test_metadata_types.log")
 
 	cfg := log.Config{
 		Service:  "test-service",
@@ -358,8 +361,7 @@ func TestLogger_MetadataTypes(t *testing.T) {
 }
 
 func TestLogger_With_PreBoundFields(t *testing.T) {
-	tmpFile := "test_with_prebound.log"
-	defer os.Remove(tmpFile)
+	tmpFile := filepath.Join(t.TempDir(), "test_with_prebound.log")
 
 	cfg := log.Config{
 		Service:  "test-service",
@@ -403,8 +405,7 @@ func TestLogger_With_PreBoundFields(t *testing.T) {
 }
 
 func TestLogger_With_ParentUnchanged(t *testing.T) {
-	tmpFile := "test_with_parent_unchanged.log"
-	defer os.Remove(tmpFile)
+	tmpFile := filepath.Join(t.TempDir(), "test_with_parent_unchanged.log")
 
 	cfg := log.Config{
 		Service:  "test-service",
@@ -443,8 +444,7 @@ func TestLogger_With_ParentUnchanged(t *testing.T) {
 }
 
 func TestLogger_With_NestedChildren(t *testing.T) {
-	tmpFile := "test_with_nested.log"
-	defer os.Remove(tmpFile)
+	tmpFile := filepath.Join(t.TempDir(), "test_with_nested.log")
 
 	cfg := log.Config{
 		Service:  "test-service",
@@ -490,8 +490,7 @@ func TestLogger_With_NestedChildren(t *testing.T) {
 }
 
 func TestLogger_With_CallerCorrectness(t *testing.T) {
-	tmpFile := "test_with_caller.log"
-	defer os.Remove(tmpFile)
+	tmpFile := filepath.Join(t.TempDir(), "test_with_caller.log")
 
 	cfg := log.Config{
 		Service:      "test-service",
@@ -541,8 +540,7 @@ func TestLogger_With_CallerCorrectness(t *testing.T) {
 }
 
 func TestLogger_With_AllLogLevels(t *testing.T) {
-	tmpFile := "test_with_levels.log"
-	defer os.Remove(tmpFile)
+	tmpFile := filepath.Join(t.TempDir(), "test_with_levels.log")
 
 	cfg := log.Config{
 		Service:  "test-service",
@@ -610,8 +608,7 @@ func TestLogger_With_EmptyFieldsSlice(t *testing.T) {
 }
 
 func TestLogger_With_AllFieldTypes(t *testing.T) {
-	tmpFile := "test_with_field_types.log"
-	defer os.Remove(tmpFile)
+	tmpFile := filepath.Join(t.TempDir(), "test_with_field_types.log")
 
 	cfg := log.Config{
 		Service:  "test-service",
@@ -701,8 +698,7 @@ func TestLogger_With_TraceIdValidation(t *testing.T) {
 }
 
 func TestLogger_With_Metadata(t *testing.T) {
-	tmpFile := "test_with_metadata.log"
-	defer os.Remove(tmpFile)
+	tmpFile := filepath.Join(t.TempDir(), "test_with_metadata.log")
 
 	cfg := log.Config{
 		Service:  "test-service",
@@ -761,8 +757,7 @@ func TestLogger_With_Metadata(t *testing.T) {
 }
 
 func TestLogger_CallerDisabledByDefault(t *testing.T) {
-	tmpFile := "test_caller_disabled.log"
-	defer os.Remove(tmpFile)
+	tmpFile := filepath.Join(t.TempDir(), "test_caller_disabled.log")
 
 	cfg := log.Config{
 		Service:  "test-service",
@@ -809,8 +804,7 @@ func TestLogger_CallerDisabledByDefault(t *testing.T) {
 }
 
 func TestLogger_CallerEnabled(t *testing.T) {
-	tmpFile := "test_caller_enabled.log"
-	defer os.Remove(tmpFile)
+	tmpFile := filepath.Join(t.TempDir(), "test_caller_enabled.log")
 
 	cfg := log.Config{
 		Service:      "test-service",
@@ -858,8 +852,7 @@ func TestLogger_CallerEnabled(t *testing.T) {
 }
 
 func TestLogger_With_PreservesCallerSetting(t *testing.T) {
-	tmpFile := "test_with_caller_setting.log"
-	defer os.Remove(tmpFile)
+	tmpFile := filepath.Join(t.TempDir(), "test_with_caller_setting.log")
 
 	// Test with EnableCaller: true
 	cfg := log.Config{
@@ -896,5 +889,440 @@ func TestLogger_With_PreservesCallerSetting(t *testing.T) {
 	}
 	if _, exists := logEntry["function"]; !exists {
 		t.Error("child logger should preserve parent's EnableCaller setting")
+	}
+}
+
+// TestNew_DefaultOutput verifies the documented default: a Config without an
+// explicit Output must construct successfully and behave as stdout output.
+func TestNew_DefaultOutput(t *testing.T) {
+	cfg := log.Config{
+		Service: "test-service",
+		Env:     "dev",
+		Level:   log.InfoLevel,
+		// Output deliberately omitted.
+	}
+
+	logger, err := log.New(cfg)
+	if err != nil {
+		t.Fatalf("expected default output to construct successfully, got %v", err)
+	}
+	if logger == nil {
+		t.Fatal("expected logger to be non-nil")
+	}
+	logger.Info("req-123", "default output", nil) // must not panic
+}
+
+// TestLogger_ReservedField verifies that user fields using library-owned keys
+// panic with the exact contract message, from both With and entry methods.
+func TestLogger_ReservedField(t *testing.T) {
+	cfg := log.Config{
+		Service: "test-service",
+		Env:     "dev",
+		Level:   log.InfoLevel,
+	}
+
+	logger, err := log.New(cfg)
+	if err != nil {
+		t.Fatalf("failed to create logger: %v", err)
+	}
+
+	t.Run("With", func(t *testing.T) {
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Fatal("expected panic for reserved field key, got none")
+			}
+			msg, ok := r.(string)
+			if !ok || msg != `log: field key "service" is reserved` {
+				t.Errorf("unexpected panic: %v", r)
+			}
+		}()
+		logger.With(log.String("service", "forged"))
+	})
+
+	t.Run("Info", func(t *testing.T) {
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Fatal("expected panic for reserved field key, got none")
+			}
+			msg, ok := r.(string)
+			if !ok || msg != `log: field key "message" is reserved` {
+				t.Errorf("unexpected panic: %v", r)
+			}
+		}()
+		logger.Info("req-123", "forged message", nil, log.String("message", "forged"))
+	})
+}
+
+// TestNew_FileOutputPreflight verifies that an unusable file path fails at
+// construction, before any log call can drop a record.
+func TestNew_FileOutputPreflight(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "blocker")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("failed to create blocker file: %v", err)
+	}
+
+	cfg := log.Config{
+		Service:  "test-service",
+		Env:      "dev",
+		Level:    log.InfoLevel,
+		Output:   log.OutputFile,
+		FilePath: filepath.Join(blocker, "sub", "app.log"), // parent exists but is a file
+	}
+
+	logger, err := log.New(cfg)
+	if err == nil {
+		logger.Sync()
+		t.Fatal("expected construction error for unusable file path, got nil")
+	}
+	if !strings.Contains(err.Error(), "prepare log file") {
+		t.Errorf("expected preflight error, got: %v", err)
+	}
+}
+
+// TestLogger_ConcurrentFileEntries verifies that concurrent logging to a file
+// sink produces exactly one intact JSON object per entry, with required keys.
+func TestLogger_ConcurrentFileEntries(t *testing.T) {
+	tmpFile := filepath.Join(t.TempDir(), "concurrent.log")
+
+	cfg := log.Config{
+		Service:  "test-service",
+		Env:      "dev",
+		Level:    log.InfoLevel,
+		Output:   log.OutputFile,
+		FilePath: tmpFile,
+	}
+
+	logger, err := log.New(cfg)
+	if err != nil {
+		t.Fatalf("failed to create logger: %v", err)
+	}
+
+	const goroutines = 8
+	const perGoroutine = 25
+	var wg sync.WaitGroup
+	for g := range goroutines {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range perGoroutine {
+				logger.Info(fmt.Sprintf("trace-%d-%d", g, i), "concurrent entry", nil)
+			}
+		}()
+	}
+	wg.Wait()
+	if err := logger.Sync(); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	content, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("failed to read log file: %v", err)
+	}
+
+	lines := bytes.Split(bytes.TrimSpace(content), []byte("\n"))
+	if len(lines) != goroutines*perGoroutine {
+		t.Fatalf("expected %d log entries, got %d", goroutines*perGoroutine, len(lines))
+	}
+	for i, line := range lines {
+		var logEntry map[string]any
+		if err := json.Unmarshal(line, &logEntry); err != nil {
+			t.Fatalf("line %d is not valid JSON (interleaved write): %v", i, err)
+		}
+		for _, key := range []string{"service", "env", "trace_id", "metadata"} {
+			if _, exists := logEntry[key]; !exists {
+				t.Errorf("line %d missing required key %q", i, key)
+			}
+		}
+	}
+}
+
+// TestLogger_FilteredDebugDoesNotWrite verifies that a debug entry below the
+// configured level produces no output, even with caller capture enabled.
+func TestLogger_FilteredDebugDoesNotWrite(t *testing.T) {
+	tmpFile := filepath.Join(t.TempDir(), "filtered.log")
+
+	cfg := log.Config{
+		Service:      "test-service",
+		Env:          "dev",
+		Level:        log.WarnLevel,
+		Output:       log.OutputFile,
+		FilePath:     tmpFile,
+		EnableCaller: true,
+	}
+
+	logger, err := log.New(cfg)
+	if err != nil {
+		t.Fatalf("failed to create logger: %v", err)
+	}
+
+	logger.Debug("req-123", "should not appear", nil)
+	if err := logger.Sync(); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	content, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("failed to read log file: %v", err)
+	}
+	if trimmed := bytes.TrimSpace(content); len(trimmed) != 0 {
+		t.Errorf("expected no output for filtered debug entry, got: %s", trimmed)
+	}
+}
+
+// TestLogger_CloseFileSink verifies shared parent/child lifecycle: entries
+// through both loggers persist, Close on the child closes the shared sink,
+// Close is idempotent, post-close Sync returns nil, and post-close entries
+// are discarded without corrupting the file.
+func TestLogger_CloseFileSink(t *testing.T) {
+	tmpFile := filepath.Join(t.TempDir(), "close.log")
+
+	cfg := log.Config{
+		Service:  "test-service",
+		Env:      "dev",
+		Level:    log.InfoLevel,
+		Output:   log.OutputFile,
+		FilePath: tmpFile,
+	}
+
+	parent, err := log.New(cfg)
+	if err != nil {
+		t.Fatalf("failed to create logger: %v", err)
+	}
+	child := parent.With(log.String("component", "child"))
+
+	parent.Info("trace-1", "before close parent", nil)
+	child.Info("trace-2", "before close child", nil)
+	if err := child.Sync(); err != nil {
+		t.Fatalf("sync before close failed: %v", err)
+	}
+
+	if err := child.Close(); err != nil {
+		t.Fatalf("child Close failed: %v", err)
+	}
+	if err := parent.Close(); err != nil {
+		t.Fatalf("repeated parent Close must be idempotent, got: %v", err)
+	}
+	if err := parent.Sync(); err != nil {
+		t.Fatalf("post-close Sync must return nil, got: %v", err)
+	}
+	parent.Info("trace-3", "after close parent", nil)
+	child.Info("trace-4", "after close child", nil)
+
+	content, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("failed to read log file: %v", err)
+	}
+	lines := bytes.Split(bytes.TrimSpace(content), []byte("\n"))
+	if len(lines) != 2 {
+		t.Fatalf("expected exactly 2 entries after close, got %d: %s", len(lines), content)
+	}
+	var first map[string]any
+	if err := json.Unmarshal(lines[0], &first); err != nil {
+		t.Fatalf("first line is not valid JSON: %v", err)
+	}
+	if first["message"] != "before close parent" {
+		t.Errorf("first entry message = %v, want before close parent", first["message"])
+	}
+	var second map[string]any
+	if err := json.Unmarshal(lines[1], &second); err != nil {
+		t.Fatalf("second line is not valid JSON: %v", err)
+	}
+	if second["message"] != "before close child" {
+		t.Errorf("second entry message = %v, want before close child", second["message"])
+	}
+}
+
+// TestLogger_SyncStdoutUnderPipe verifies Sync returns nil for stdout output
+// even when stdout is a pipe: v0.2 fsynced os.Stdout, which fails with EBADF
+// on pipes and ttys; stdout writes are unbuffered, so there is nothing to
+// flush. The test binary's stdout is redirected to a pipe by go test.
+func TestLogger_SyncStdoutUnderPipe(t *testing.T) {
+	logger, err := log.New(log.Config{
+		Service: "test-service",
+		Env:     "dev",
+		Level:   log.InfoLevel,
+		Output:  log.OutputStdout,
+	})
+	if err != nil {
+		t.Fatalf("failed to create logger: %v", err)
+	}
+	logger.Info("req-123", "sync stdout", nil)
+	if err := logger.Sync(); err != nil {
+		t.Fatalf("stdout Sync must return nil (unbuffered writes), got: %v", err)
+	}
+}
+
+// TestLogger_CloseStdout verifies Close is a no-op returning nil for stdout.
+func TestLogger_CloseStdout(t *testing.T) {
+	logger, err := log.New(log.Config{
+		Service: "test-service",
+		Env:     "dev",
+		Level:   log.InfoLevel,
+		Output:  log.OutputStdout,
+	})
+	if err != nil {
+		t.Fatalf("failed to create logger: %v", err)
+	}
+	if err := logger.Close(); err != nil {
+		t.Fatalf("stdout Close must return nil, got: %v", err)
+	}
+	// Stdout logging must keep working after Close.
+	logger.Info("req-123", "still logging", nil)
+}
+
+// TestLogger_CloseConcurrent verifies that Close contending with parent/child
+// Info+Sync goroutines never interleaves a write: every persisted nonempty
+// line must decode as one JSON object, and a final Close returns nil.
+func TestLogger_CloseConcurrent(t *testing.T) {
+	tmpFile := filepath.Join(t.TempDir(), "close-concurrent.log")
+
+	cfg := log.Config{
+		Service:  "test-service",
+		Env:      "dev",
+		Level:    log.InfoLevel,
+		Output:   log.OutputFile,
+		FilePath: tmpFile,
+	}
+
+	parent, err := log.New(cfg)
+	if err != nil {
+		t.Fatalf("failed to create logger: %v", err)
+	}
+	child := parent.With(log.String("component", "child"))
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			parent.Info("trace-parent", "concurrent parent", nil)
+		}
+		if err := parent.Sync(); err != nil {
+			t.Errorf("parent sync: %v", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			child.Info("trace-child", "concurrent child", nil)
+		}
+		if err := child.Sync(); err != nil {
+			t.Errorf("child sync: %v", err)
+		}
+	}()
+
+	go func() {
+		if err := parent.Close(); err != nil {
+			t.Errorf("Close under contention: %v", err)
+		}
+	}()
+	wg.Wait()
+
+	// Wait for Close goroutine to finish before final assertions.
+	time.Sleep(10 * time.Millisecond)
+	if err := parent.Close(); err != nil {
+		t.Fatalf("final Close must return nil, got: %v", err)
+	}
+
+	content, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("failed to read log file: %v", err)
+	}
+	for i, line := range bytes.Split(bytes.TrimSpace(content), []byte("\n")) {
+		if len(line) == 0 {
+			continue
+		}
+		var entry map[string]any
+		if err := json.Unmarshal(line, &entry); err != nil {
+			t.Fatalf("line %d is not valid JSON (interleaved write): %v", i, err)
+		}
+	}
+}
+
+// TestNop verifies Nop emits nothing, stays composable via With, returns nil
+// from Sync and Close, and preserves the input-validation panic contracts.
+func TestNop(t *testing.T) {
+	nop := log.Nop()
+	if nop == nil {
+		t.Fatal("expected Nop to return a non-nil logger")
+	}
+
+	// Every nonfatal method must be callable and silent.
+	nop.Debug("trace", "debug", nil)
+	nop.Info("trace", "info", nil)
+	nop.Warn("trace", "warn", nil)
+	nop.Error("trace", "error", nil)
+
+	child := nop.With(log.String("key", "value"))
+	child.Info("trace", "child info", nil)
+
+	if err := nop.Sync(); err != nil {
+		t.Errorf("Nop Sync must return nil, got: %v", err)
+	}
+	if err := nop.Close(); err != nil {
+		t.Errorf("Nop Close must return nil, got: %v", err)
+	}
+
+	// Validation policy preserved: empty trace ID panics.
+	assertPanic(t, "log: traceId cannot be empty", func() {
+		nop.Info("", "empty trace", nil)
+	})
+
+	// Validation policy preserved: reserved key panics.
+	assertPanic(t, `log: field key "trace_id" is reserved`, func() {
+		nop.Info("trace", "reserved key", nil, log.String("trace_id", "forged"))
+	})
+}
+
+// assertPanic asserts fn panics with exactly wantMsg.
+func assertPanic(t *testing.T, wantMsg string, fn func()) {
+	t.Helper()
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatalf("expected panic %q, got none", wantMsg)
+		}
+		msg, ok := r.(string)
+		if !ok {
+			t.Fatalf("expected string panic %q, got %T: %v", wantMsg, r, r)
+		}
+		if msg != wantMsg {
+			t.Fatalf("panic = %q, want %q", msg, wantMsg)
+		}
+	}()
+	fn()
+}
+
+// TestNopFatalHelperProcess is only run as a helper process by
+// TestNopFatalExits; it must terminate the process via Nop().Fatal.
+func TestNopFatalHelperProcess(t *testing.T) {
+	if os.Getenv("LOG_NOP_FATAL_HELPER") != "1" {
+		t.Skip("helper process for TestNopFatalExits")
+	}
+	log.Nop().Fatal("trace", "fatal", nil)
+}
+
+// TestNopFatalExits verifies Nop preserves the fatal exit-1 contract by
+// re-executing the test binary as a helper process.
+func TestNopFatalExits(t *testing.T) {
+	if os.Getenv("LOG_NOP_FATAL_HELPER") == "1" {
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestNopFatalHelperProcess$")
+	cmd.Env = append(os.Environ(), "LOG_NOP_FATAL_HELPER=1")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected non-zero exit from Nop().Fatal, got success; output:\n%s", out)
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected *exec.ExitError, got %T: %v; output:\n%s", err, err, out)
+	}
+	if code := exitErr.ExitCode(); code != 1 {
+		t.Fatalf("exit code = %d, want 1; output:\n%s", code, out)
 	}
 }

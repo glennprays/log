@@ -1,0 +1,50 @@
+name: CI
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Check formatting
+        run: |
+          unformatted="$(find . -path ./vendor -prune -o -name '*.go' -print0 | xargs -0 gofmt -l)"
+          test -z "$unformatted" || { printf '%s\n' "$unformatted"; exit 1; }
+      - run: go mod verify
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+      - run: go build ./...
+      - run: go test -run '^$' -bench '^(BenchmarkLoggerInfoCallerDisabled|BenchmarkLoggerInfoCallerEnabled|BenchmarkLoggerDebugFiltered)$' -benchtime=1x -count=1 ./...
+      - run: go run ./examples/stdout
+      - run: go run ./examples/file
+      - name: Verify v0.2 consumer source compatibility
+        run: |
+          consumer="$(mktemp -d)"
+          trap 'rm -rf "$consumer"' EXIT
+          cp testdata/v0_2_consumer/main.go "$consumer/main.go"
+          cat >"$consumer/go.mod" <<EOF
+          module example.com/log-v0-2-consumer
+          go 1.25.0
+          require github.com/glennprays/log v0.2.0
+          replace github.com/glennprays/log => $GITHUB_WORKSPACE
+          EOF
+          (cd "$consumer" && go mod tidy && go run .)
+  published-install:
+    needs: quality
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Verify published SDK installation
+        run: |
+          consumer="$(mktemp -d)"
+          trap 'rm -rf "$consumer"' EXIT
+          cp testdata/v0_2_consumer/main.go "$consumer/main.go"
+          (cd "$consumer" && go mod init example.com/log-v0-2-consumer && GOPROXY=direct go get github.com/glennprays/log@${GITHUB_REF_NAME} && go run .)

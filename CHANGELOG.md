@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.3.0] - 2026-11-26
+
+### Breaking Changes
+
+**Reserved user-field keys now rejected**
+
+Nine JSON keys are now owned by the library and rejected as user fields (via `With()` or any log method's `fields` parameter). Using one panics with `log: field key "<key>" is reserved`:
+
+`timestamp`, `level`, `message`, `service`, `env`, `trace_id`, `metadata`, `caller`, `function`
+
+**Migration**: replace each collision with a distinct business key (e.g. `http_status` instead of `level`). Duplicate JSON keys would otherwise let a user field forge or override a required field in JSON decoders. Note that `error` remains permitted through `log.Error(err)`.
+
+All v0.2 method signatures (`Config`, `Level`, `OutputType`, field helpers, `New`, `With`, `Debug`, `Info`, `Warn`, `Error`, `Fatal`, `Sync`) retain their signatures and behavior; v0.2 consumer source compiles without edits.
+
+### Added
+
+- `Logger.Close()` — concurrency-safe file-sink shutdown. Idempotent; blocks until an in-flight write or `Sync` on the logger or any `With` child completes. No-op for stdout and `Nop`. After close, nonfatal entries are discarded, `Sync` returns `nil`, and `Fatal` still exits with status 1.
+- `log.Nop()` — no-op logger preserving input validation (empty trace IDs and reserved keys still panic) and fatal exit status 1, while emitting no records.
+- Runnable examples: [`examples/stdout`](examples/stdout/main.go) and [`examples/file`](examples/file/main.go) (artifact-free; `go run` per directory).
+- GitHub Actions CI (`quality` job on every push/pull request; `published-install` job on version tags) covering formatting, `go mod verify`, vet, race tests, build, benchmark execution, examples, and v0.2 consumer source compatibility (local replace on PRs; published tag install after release).
+- Performance benchmarks: `BenchmarkLoggerInfoCallerDisabled`, `BenchmarkLoggerInfoCallerEnabled`, `BenchmarkLoggerDebugFiltered` (informational; no CI thresholds).
+
+### Fixed
+
+- stdout zero-value default: `Config.Output` omitted now correctly defaults to `OutputStdout`.
+- stdout `Sync` no longer attempts to fsync `os.Stdout`, which failed with `sync /dev/stdout: bad file descriptor` when stdout was a pipe or terminal. stdout writes are unbuffered, so `Sync` returns `nil` for stdout output; only file output has a sink to flush.
+- Construction-time file preflight: an unusable `FilePath` fails in `New` instead of dropping the first record on first write.
+- Concurrent stdout writes are serialized through a locked sink so entries never interleave mid-JSON.
+- Disabled-level fast path: entries below the configured level return before field-slice allocation and caller lookup.
+- Corrected `log.Error(err)` documentation (key `error`; writes the error's message, plus verbose/cause details where exposed).
+
+---
+
 ## [v0.2.0] - 2026-01-21
 
 ### Breaking Changes

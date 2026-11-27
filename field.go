@@ -42,7 +42,8 @@ func Any(key string, value any) Field {
 }
 
 // Error creates an error field with the key "error".
-// The error message and type will be included in the log output.
+// The error's message is included in the log output; verbose/cause details are
+// added only for error types that expose them (e.g. wrapped or grouped errors).
 func Error(err error) Field {
 	return Field{zapField: zap.Error(err)}
 }
